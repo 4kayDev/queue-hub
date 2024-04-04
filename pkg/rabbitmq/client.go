@@ -3,6 +3,7 @@ package rabbitmq
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"sync"
 
@@ -181,6 +182,7 @@ func (c *QueueClient[T]) produceToDLQ(ctx context.Context, body []byte, retriesC
 			DeliveryMode: amqp.Persistent,
 			Type:         "plain/text",
 			Body:         body,
+			Expiration:   "2000",
 		},
 	)
 
@@ -192,7 +194,7 @@ func (c *QueueClient[T]) Consume(ctx context.Context, handler queuehub.ConsumerF
 	if err != nil {
 		return err
 	}
-
+	fmt.Println(c.queue.Name)
 	msgs, err := c.channel.Consume(
 		c.queue.Name,
 		"",
@@ -207,6 +209,7 @@ func (c *QueueClient[T]) Consume(ctx context.Context, handler queuehub.ConsumerF
 	}
 	var forever chan struct {
 	}
+	fmt.Println(msgs)
 	for msg := range msgs {
 		var retriesCount int64 = 0
 		count, ok := msg.Headers["count"].(int64)
@@ -285,7 +288,7 @@ func buildQueueArgs(cfg *config.RabbitMQQueueConfig) amqp.Table {
 
 func buildDLQArgs(cfg *config.RabbitMQQueueConfig) amqp.Table {
 	return amqp.Table{
-		"X-Message-TTL": 1000, 
+		"X-Message-TTL":             cfg.TTL,
 		"x-dead-letter-exchange":    cfg.DlxName,
 		"x-dead-letter-routing-key": cfg.RoutingKey,
 	}
