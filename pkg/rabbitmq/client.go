@@ -169,7 +169,6 @@ func (c *QueueClient[T]) produceToDLQ(ctx context.Context, body []byte, retriesC
 		return err
 	}
 
-	exp := c.cfg.TTL * int32(retriesCount+1)
 	err = c.channel.PublishWithContext(
 		ctx,
 		c.cfg.DlxName,
@@ -181,7 +180,7 @@ func (c *QueueClient[T]) produceToDLQ(ctx context.Context, body []byte, retriesC
 			DeliveryMode: amqp.Persistent,
 			Type:         "plain/text",
 			Body:         body,
-			Expiration:   fmt.Sprintf("%d", exp),
+			Expiration:   fmt.Sprintf("%d", 100),
 		},
 	)
 
@@ -203,6 +202,9 @@ func (c *QueueClient[T]) Consume(ctx context.Context, handler queuehub.ConsumerF
 		false, // no-await
 		nil,
 	)
+	if err != nil {
+		return err
+	}
 	var forever chan struct {
 	}
 	for msg := range msgs {
