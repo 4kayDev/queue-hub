@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	queuehub "github.com/4kayDev/queuehub/interface"
 	"github.com/4kayDev/queuehub/pkg/config"
@@ -91,34 +92,34 @@ func (c *QueueClient[T]) createQueue(ctx context.Context) error {
 		return err
 	}
 
-	// Declaring Dead-Letter queue
-	dlq, err := c.channel.QueueDeclare(
-		q.Name+"_dlq",
-		c.cfg.IsDurable,
-		c.cfg.IsAutoDelete,
-		c.cfg.IsExclusive,
-		false,
-		buildDLQArgs(c.cfg),
-	)
-	if err != nil {
-		c.mu.Unlock()
-		return err
-	}
+	// // Declaring Dead-Letter queue
+	// dlq, err := c.channel.QueueDeclare(
+	// 	q.Name+"_dlq",
+	// 	c.cfg.IsDurable,
+	// 	c.cfg.IsAutoDelete,
+	// 	c.cfg.IsExclusive,
+	// 	false,
+	// 	buildDLQArgs(c.cfg),
+	// )
+	// if err != nil {
+	// 	c.mu.Unlock()
+	// 	return err
+	// }
 
-	// Binding exchange with DLQ
-	err = c.channel.QueueBind(
-		q.Name+"_dlq",
-		c.cfg.RoutingKey+"_dlq",
-		c.cfg.DlxName,
-		false,
-		nil,
-	)
-	if err != nil {
-		c.mu.Unlock()
-		return err
-	}
+	// // Binding exchange with DLQ
+	// err = c.channel.QueueBind(
+	// 	q.Name+"_dlq",
+	// 	c.cfg.RoutingKey+"_dlq",
+	// 	c.cfg.DlxName,
+	// 	false,
+	// 	nil,
+	// )
+	// if err != nil {
+	// 	c.mu.Unlock()
+	// 	return err
+	// }
 
-	c.dlQueue = &dlq
+	// c.dlQueue = &dlq
 	c.queue = &q
 	c.mu.Unlock()
 
@@ -206,62 +207,71 @@ func (c *QueueClient[T]) Consume(ctx context.Context, handler queuehub.ConsumerF
 	if err != nil {
 		return err
 	}
-	
+
 	var forever chan struct {
 	}
 	for msg := range msgs {
-		var retriesCount int64 = 0
-		xDeath, ok := msg.Headers["x-death"].([]interface{})
-		if !ok || xDeath == nil {
-			log.Printf("Failed to get retriesCount on message with ID: %s", msg.MessageId)
-			retriesCount = 0
-		} else {
-			retriesCount = xDeath[0].(amqp.Table)["count"].(int64)
-		}
-
-		if retriesCount >= c.cfg.MaxRerties {
-			log.Printf("Message with ID: %s reached the maximum retries", msg.MessageId)
-			err = msg.Ack(false)
-			if err != nil {
-				return err
+		go func() {
+			var retriesCount int64 = 0
+			xDeath, ok := msg.Headers["x-death"].([]interface{})
+			if !ok || xDeath == nil {
+				log.Printf("Failed to get retriesCount on message with ID: %s", msg.MessageId)
+				retriesCount = 0
+			} else {
+				retriesCount = xDeath[0].(amqp.Table)["count"].(int64)
 			}
-		}
 
-		dest := new(T)
+			if retriesCount >= c.cfg.MaxRerties {
+				log.Printf("Message with ID: %s reached the maximum retries", msg.MessageId)
+				err = msg.Ack(false)
+				if err != nil {
+					log.Println(err)
+					return
+				}
+			}
+			time.Sleep(time.Duration(int64(time.Second) * retriesCount))
 
-		err := json.Unmarshal(msg.Body, dest)
-		if err != nil {
-			return err
-		}
+			dest := new(T)
 
-		result, err := handler(ctx, *dest, &queuehub.Meta{
-			AttemptNumber: retriesCount,
-		})
-		if err != nil {
-			return err
-		}
+			err := json.Unmarshal(msg.Body, dest)
+			if err != nil {
+				log.Println(err)
+				return
+			}
 
-		switch result {
-		case queuehub.ACK:
-			err = msg.Ack(false)
+			result, err := handler(ctx, *dest, &queuehub.Meta{
+				AttemptNumber: retriesCount,
+			})
 			if err != nil {
-				return err
+				log.Println(err)
+				return
 			}
-		case queuehub.NACK:
-			err = msg.Nack(false, false)
-			if err != nil {
-				return err
+
+			switch result {
+			case queuehub.ACK:
+				err = msg.Ack(false)
+				if err != nil {
+					log.Println(err)
+					return
+				}
+			case queuehub.NACK:
+				err = msg.Nack(false, false)
+				if err != nil {
+					log.Println(err)
+					return
+				}
+			case queuehub.DEFER:
+				// err = c.produceToDLQ(ctx, msg.Body, retriesCount, msg.Headers)
+				// if err != nil {
+				// 	return err
+				// }
+				err = msg.Nack(false, false)
+				if err != nil {
+					log.Println(err)
+					return
+				}
 			}
-		case queuehub.DEFER:
-			err = c.produceToDLQ(ctx, msg.Body, retriesCount, msg.Headers)
-			if err != nil {
-				return err
-			}
-			err = msg.Ack(false)
-			if err != nil {
-				return err
-			}
-		}
+		}()
 	}
 	<-forever
 	return nil
