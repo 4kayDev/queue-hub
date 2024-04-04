@@ -3,7 +3,6 @@ package rabbitmq
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
 	"sync"
 
@@ -154,7 +153,7 @@ func (c *QueueClient[T]) Produce(ctx context.Context, msg T) error {
 		false,            // Mandatory
 		false,            // Immediate
 		amqp.Publishing{
-			Headers:      amqp.Table{"count": int64(0), "x-expires": 1000},
+			Headers:      amqp.Table{"count": int64(0), "x-message-ttl": 5000},
 			DeliveryMode: amqp.Persistent,
 			Type:         "plain/text",
 			Body:         body,
@@ -182,7 +181,6 @@ func (c *QueueClient[T]) produceToDLQ(ctx context.Context, body []byte, retriesC
 			DeliveryMode: amqp.Persistent,
 			Type:         "plain/text",
 			Body:         body,
-			Expiration:   fmt.Sprintf("%d", 2000),
 		},
 	)
 
