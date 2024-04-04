@@ -154,6 +154,7 @@ func (c *QueueClient[T]) Produce(ctx context.Context, msg T) error {
 		false,            // Mandatory
 		false,            // Immediate
 		amqp.Publishing{
+			Headers:      amqp.Table{"count": int64(0), "x-expires": 1000},
 			DeliveryMode: amqp.Persistent,
 			Type:         "plain/text",
 			Body:         body,
@@ -168,7 +169,8 @@ func (c *QueueClient[T]) produceToDLQ(ctx context.Context, body []byte, retriesC
 	if err != nil {
 		return err
 	}
-	table["x-expires"] = fmt.Sprintf("%d", 100)
+
+	table["count"] = retriesCount + 1
 	err = c.channel.PublishWithContext(
 		ctx,
 		c.cfg.DlxName,
@@ -180,10 +182,10 @@ func (c *QueueClient[T]) produceToDLQ(ctx context.Context, body []byte, retriesC
 			DeliveryMode: amqp.Persistent,
 			Type:         "plain/text",
 			Body:         body,
-			Expiration:   fmt.Sprintf("%d", 100),
+			Expiration:   fmt.Sprintf("%d", 2000),
 		},
 	)
-	
+
 	return err
 }
 
@@ -209,12 +211,12 @@ func (c *QueueClient[T]) Consume(ctx context.Context, handler queuehub.ConsumerF
 	}
 	for msg := range msgs {
 		var retriesCount int64 = 0
-		xDeath, ok := msg.Headers["x-death"].([]interface{})
-		if !ok || xDeath == nil {
+		count, ok := msg.Headers["count"].(int64)
+		if !ok {
 			log.Printf("Failed to get retriesCount on message with ID: %s", msg.MessageId)
 			retriesCount = 0
 		} else {
-			retriesCount = xDeath[0].(amqp.Table)["count"].(int64)
+			retriesCount = count
 		}
 
 		if retriesCount >= c.cfg.MaxRerties {
