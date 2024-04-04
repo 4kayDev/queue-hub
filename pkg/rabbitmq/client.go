@@ -154,7 +154,6 @@ func (c *QueueClient[T]) Produce(ctx context.Context, msg T) error {
 		false,            // Mandatory
 		false,            // Immediate
 		amqp.Publishing{
-			Headers:      amqp.Table{"count": int64(0), "X-Message-TTl": 5000},
 			DeliveryMode: amqp.Persistent,
 			Type:         "plain/text",
 			Body:         body,
@@ -170,7 +169,7 @@ func (c *QueueClient[T]) produceToDLQ(ctx context.Context, body []byte, retriesC
 		return err
 	}
 
-	table["count"] = retriesCount + 1
+	exp := c.cfg.TTL * int32(retriesCount+1)
 	err = c.channel.PublishWithContext(
 		ctx,
 		c.cfg.DlxName,
@@ -182,7 +181,7 @@ func (c *QueueClient[T]) produceToDLQ(ctx context.Context, body []byte, retriesC
 			DeliveryMode: amqp.Persistent,
 			Type:         "plain/text",
 			Body:         body,
-			Expiration:   "2000",
+			Expiration:   fmt.Sprintf("%d", exp),
 		},
 	)
 
@@ -194,7 +193,7 @@ func (c *QueueClient[T]) Consume(ctx context.Context, handler queuehub.ConsumerF
 	if err != nil {
 		return err
 	}
-	fmt.Println(c.queue.Name)
+
 	msgs, err := c.channel.Consume(
 		c.queue.Name,
 		"",
@@ -207,17 +206,17 @@ func (c *QueueClient[T]) Consume(ctx context.Context, handler queuehub.ConsumerF
 	if err != nil {
 		return err
 	}
+	
 	var forever chan struct {
 	}
-	fmt.Println(msgs)
 	for msg := range msgs {
 		var retriesCount int64 = 0
-		count, ok := msg.Headers["count"].(int64)
-		if !ok {
+		xDeath, ok := msg.Headers["x-death"].([]interface{})
+		if !ok || xDeath == nil {
 			log.Printf("Failed to get retriesCount on message with ID: %s", msg.MessageId)
 			retriesCount = 0
 		} else {
-			retriesCount = count
+			retriesCount = xDeath[0].(amqp.Table)["count"].(int64)
 		}
 
 		if retriesCount >= c.cfg.MaxRerties {
@@ -288,7 +287,6 @@ func buildQueueArgs(cfg *config.RabbitMQQueueConfig) amqp.Table {
 
 func buildDLQArgs(cfg *config.RabbitMQQueueConfig) amqp.Table {
 	return amqp.Table{
-		"X-Message-TTL":             cfg.TTL,
 		"x-dead-letter-exchange":    cfg.DlxName,
 		"x-dead-letter-routing-key": cfg.RoutingKey,
 	}
