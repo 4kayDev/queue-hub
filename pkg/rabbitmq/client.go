@@ -168,7 +168,7 @@ func (c *QueueClient[T]) produceToDLQ(ctx context.Context, body []byte, retriesC
 	if err != nil {
 		return err
 	}
-
+	table["x-expires"] = fmt.Sprintf("%d", 100)
 	err = c.channel.PublishWithContext(
 		ctx,
 		c.cfg.DlxName,
@@ -183,7 +183,7 @@ func (c *QueueClient[T]) produceToDLQ(ctx context.Context, body []byte, retriesC
 			Expiration:   fmt.Sprintf("%d", 100),
 		},
 	)
-
+	
 	return err
 }
 
