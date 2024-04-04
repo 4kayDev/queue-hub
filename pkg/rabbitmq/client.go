@@ -153,7 +153,7 @@ func (c *QueueClient[T]) Produce(ctx context.Context, msg T) error {
 		false,            // Mandatory
 		false,            // Immediate
 		amqp.Publishing{
-			Headers:      amqp.Table{"count": int64(0), "x-message-ttl": 5000},
+			Headers:      amqp.Table{"count": int64(0), "X-Message-TTl": 5000},
 			DeliveryMode: amqp.Persistent,
 			Type:         "plain/text",
 			Body:         body,
@@ -285,6 +285,7 @@ func buildQueueArgs(cfg *config.RabbitMQQueueConfig) amqp.Table {
 
 func buildDLQArgs(cfg *config.RabbitMQQueueConfig) amqp.Table {
 	return amqp.Table{
+		"X-Message-TTL": 1000, 
 		"x-dead-letter-exchange":    cfg.DlxName,
 		"x-dead-letter-routing-key": cfg.RoutingKey,
 	}
