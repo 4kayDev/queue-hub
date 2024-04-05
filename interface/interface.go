@@ -13,7 +13,7 @@ const (
 )
 
 type Meta struct {
-	AttemptNumber int32
+	AttemptNumber int64
 }
 
 type ConsumerFunc[T any] func(ctx context.Context, msg T, meta *Meta) (Result, error)
@@ -23,7 +23,7 @@ type Consumer[T any] interface {
 }
 
 type Producer[T any] interface {
-	Produce(ctx context.Context, msg T, delaySeconds int) error
+	Produce(ctx context.Context, msg T) error
 }
 
 type QueuesClient[T any] interface {
